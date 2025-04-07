@@ -5,10 +5,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         .container {
-            max-width: 800px;
-            margin-top: 50px;
+            max-width: 1200px;
+            margin-top: 30px;
+        }
+        .visualization-container {
+            height: 600px;
+            overflow: hidden;
         }
     </style>
 </head>
@@ -39,13 +44,60 @@
             </div>
         </div>
 
+        <div id="loading" class="mt-4 d-none">
+            <div class="d-flex justify-content-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+            <p class="text-center mt-2">Retrieving and processing data, this may take a few minutes...</p>
+        </div>
+
         <div id="results" class="mt-4 d-none">
-            <h3>Results</h3>
-            <div id="resultsContent"></div>
+            <h3>Clustering Results</h3>
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">Dataset Cluster Visualization</h5>
+                        </div>
+                        <div class="card-body visualization-container">
+                            <div id="visualization"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">Cluster Information</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="clusterInfo"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Dataset Details</h5>
+                </div>
+                <div class="card-body">
+                    <div id="datasetDetails"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="error" class="mt-4 d-none">
+            <div class="alert alert-danger" role="alert">
+                <h4 class="alert-heading">Error</h4>
+                <p id="errorMessage"></p>
+            </div>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/visualization.js') }}"></script>
     <script>
         document.getElementById('pmidForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -60,8 +112,10 @@
 
             const pmids = pmidsText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
 
-            document.getElementById('resultsContent').innerHTML = 'Processing, please wait...';
-            document.getElementById('results').classList.remove('d-none');
+            // Show loading indicator
+            document.getElementById('loading').classList.remove('d-none');
+            document.getElementById('results').classList.add('d-none');
+            document.getElementById('error').classList.add('d-none');
 
             try {
                 const response = await fetch('/api/fetch-geo-data', {
@@ -74,25 +128,79 @@
 
                 const data = await response.json();
 
+                // Hide loading indicator
+                document.getElementById('loading').classList.add('d-none');
+
                 if (response.ok) {
-                    const datasets = data.datasets;
-                    document.getElementById('resultsContent').innerHTML = `
-                        <p>Found ${datasets.length} GEO datasets for ${pmids.length} PMIDs.</p>
-                        <pre>${JSON.stringify(data, null, 2)}</pre>
-                    `;
+                    // Show results
+                    document.getElementById('results').classList.remove('d-none');
+
+                    // Create visualization
+                    if (data.visualization && data.visualization.nodes.length > 0) {
+                        createForceGraph(data.visualization, 'visualization');
+                    } else {
+                        document.getElementById('visualization').innerHTML = '<p class="text-center">No visualization data available</p>';
+                    }
+
+                    // Display cluster information
+                    const clusterInfoElement = document.getElementById('clusterInfo');
+                    if (data.n_clusters && data.visualization && data.visualization.clusters) {
+                        let clusterHtml = `<p>Number of clusters: ${data.n_clusters}</p>`;
+                        clusterHtml += '<ul>';
+
+                        data.visualization.clusters.forEach(cluster => {
+                            clusterHtml += `<li>Cluster ${cluster.id}: ${cluster.size} datasets</li>`;
+                        });
+
+                        clusterHtml += '</ul>';
+                        clusterInfoElement.innerHTML = clusterHtml;
+                    } else {
+                        clusterInfoElement.innerHTML = '<p>No cluster information available</p>';
+                    }
+
+                    // Display dataset details
+                    const datasetDetailsElement = document.getElementById('datasetDetails');
+                    if (data.datasets && data.datasets.length > 0) {
+                        let datasetsHtml = '<div class="table-responsive"><table class="table table-striped table-hover">';
+                        datasetsHtml += '<thead><tr><th>GEO ID</th><th>Title</th><th>Experiment Type</th><th>Organism</th><th>PMID</th><th>Cluster</th></tr></thead>';
+                        datasetsHtml += '<tbody>';
+
+                        data.datasets.forEach(dataset => {
+                            datasetsHtml += `<tr>
+                                <td>${dataset.geo_id}</td>
+                                <td>${dataset.title}</td>
+                                <td>${dataset.experiment_type}</td>
+                                <td>${dataset.organism}</td>
+                                <td>${dataset.pmid}</td>
+                                <td>${dataset.cluster !== undefined ? dataset.cluster : 'N/A'}</td>
+                            </tr>`;
+                        });
+
+                        datasetsHtml += '</tbody></table></div>';
+                        datasetDetailsElement.innerHTML = datasetsHtml;
+                    } else {
+                        datasetDetailsElement.innerHTML = '<p>No dataset details available</p>';
+                    }
                 } else {
-                    document.getElementById('resultsContent').innerHTML = `
-                        <div class="alert alert-danger">
-                            Error: ${data.error || 'Unknown error'}
-                        </div>
-                    `;
+                    // Show error
+                    document.getElementById('error').classList.remove('d-none');
+                    document.getElementById('errorMessage').textContent = data.error || 'An unknown error occurred';
                 }
             } catch (error) {
-                document.getElementById('resultsContent').innerHTML = `
-                    <div class="alert alert-danger">
-                        Error: ${error.message || 'Unknown error'}
-                    </div>
-                `;
+                // Hide loading indicator and show error
+                document.getElementById('loading').classList.add('d-none');
+                document.getElementById('error').classList.remove('d-none');
+                document.getElementById('errorMessage').textContent = error.message || 'An unknown error occurred';
+            }
+        });
+
+        // Add example PMIDs
+        document.addEventListener('DOMContentLoaded', function() {
+            const examplePmids = ['25404168', '31820734', '31018141'];
+            const pmidsTextarea = document.getElementById('pmids');
+
+            if (pmidsTextarea && !pmidsTextarea.value) {
+                pmidsTextarea.value = examplePmids.join('\n');
             }
         });
     </script>

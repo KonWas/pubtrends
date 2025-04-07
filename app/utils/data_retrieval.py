@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 import time
 import logging
 from typing import List, Dict, Optional, Tuple
+from app.utils.cache import cached_result, get_from_cache, add_to_cache, pmid_cache, geo_cache
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -50,6 +51,12 @@ class EUtilsClient:
         Returns:
             List of GEO dataset IDs (GSE IDs)
         """
+        # Check cache first
+        cached = get_from_cache(pmid_cache, pmid)
+        if cached is not None:
+            logger.info(f"Using cached GEO IDs for PMID {pmid}")
+            return cached
+
         self._respect_rate_limit()
 
         params = {
@@ -84,6 +91,9 @@ class EUtilsClient:
                             geo_ids.append(geo_id)
 
             logger.info(f"Found {len(geo_ids)} GEO datasets for PMID {pmid}")
+
+            # Add to cache before returning
+            add_to_cache(pmid_cache, pmid, geo_ids)
             return geo_ids
 
         except requests.exceptions.RequestException as e:
@@ -100,6 +110,12 @@ class EUtilsClient:
         Returns:
             Dictionary containing dataset details
         """
+        # Check cache first
+        cached = get_from_cache(geo_cache, geo_id)
+        if cached is not None:
+            logger.info(f"Using cached details for GEO dataset {geo_id}")
+            return cached
+
         self._respect_rate_limit()
 
         params = {
@@ -152,6 +168,10 @@ class EUtilsClient:
                             dataset["overall_design"] = sub_item.text or ""
 
             logger.info(f"Retrieved details for GEO dataset {geo_id}")
+
+            # Add to cache before returning
+            add_to_cache(geo_cache, geo_id, dataset)
+
             return dataset
 
         except requests.exceptions.RequestException as e:
